@@ -140,6 +140,34 @@ void runCPU(int count) {
   std::cout << "Time: " << diff.count() * 1000.0 << " ms\n";
 }
 
+void getQueryResults(ID3D11Asynchronous *pQueryDisjoint,
+                     ID3D11Asynchronous *pQueryTimestampStart,
+                     ID3D11Asynchronous *pQueryTimestampEnd, void *pStartTime,
+                     void *pEndTime, UINT DataSize, float *kernel_time) {
+  D3D11_QUERY_DATA_TIMESTAMP_DISJOINT tsDisjoint;
+  while (S_OK != g_pContext->GetData(pQueryDisjoint, &tsDisjoint,
+                                     sizeof(tsDisjoint), 0))
+    ;
+  if (tsDisjoint.Disjoint) {
+    printf("Disjoint is true\n");
+  }
+
+  while (g_pContext->GetData(pQueryTimestampStart, pStartTime, DataSize, 0) !=
+         S_OK)
+    ;
+  if (tsDisjoint.Disjoint) {
+    printf("Disjoint is true\n");
+  }
+  while (g_pContext->GetData(pQueryTimestampEnd, pEndTime, DataSize, 0) != S_OK)
+    ;
+
+  UINT64 queryFrequency = tsDisjoint.Frequency;
+
+  UINT64 Delta = *((UINT64 *)pEndTime) - *((UINT64 *)pStartTime);
+  float Frequency = static_cast<float>(queryFrequency);
+  *(float *)(kernel_time) = (Delta / Frequency) * 1000.0f;
+}
+
 //--------------------------------------------------------------------------------------
 // Entry point to the program
 //--------------------------------------------------------------------------------------
@@ -265,111 +293,23 @@ int __cdecl main() {
     g_pContext->End(pQueryDisjoint2);
     g_pContext->Flush();
 
-    // Get query data
-    D3D11_QUERY_DATA_TIMESTAMP_DISJOINT tsDisjoint;
-    while (S_OK != g_pContext->GetData(pQueryDisjoint, &tsDisjoint,
-                                       sizeof(tsDisjoint), 0))
-      ;
-    if (tsDisjoint.Disjoint) {
-      printf("Disjoint is true\n");
-    }
-
+    // Get Data for timestamp.
     UINT64 StartTime = 0;
-    while (g_pContext->GetData(pQueryTimestampStart, &StartTime,
-                               sizeof(StartTime), 0) != S_OK)
-      ;
     UINT64 EndTime = 0;
-    while (g_pContext->GetData(pQueryTimestampEnd, &EndTime, sizeof(EndTime),
-                               0) != S_OK)
-      ;
+    float kernel_time = 0.0;
+    getQueryResults(pQueryDisjoint, pQueryTimestampStart, pQueryTimestampEnd,
+                    &StartTime, &EndTime, sizeof(EndTime), &kernel_time);
 
     // Get Data for timestamp2.
     UINT64 StartTime2 = 0;
     UINT64 EndTime2 = 0;
-    {
-
-      // Get query data
-      D3D11_QUERY_DATA_TIMESTAMP_DISJOINT tsDisjoint;
-      while (S_OK != g_pContext->GetData(pQueryDisjoint2, &tsDisjoint,
-                                         sizeof(tsDisjoint), 0))
-        ;
-      if (tsDisjoint.Disjoint) {
-        printf("Disjoint is true\n");
-      }
-
-      while (g_pContext->GetData(pQueryTimestampStart2, &StartTime2,
-                                 sizeof(StartTime2), 0) != S_OK)
-        ;
-
-      while (g_pContext->GetData(pQueryTimestampEnd2, &EndTime2,
-                                 sizeof(EndTime2), 0) != S_OK)
-        ;
-
-      UINT64 Delta = EndTime2 - StartTime2;
-      float Frequency = static_cast<float>(tsDisjoint.Frequency);
-      float kernel_time = (Delta / Frequency) * 1000.0f;
-      printf("timestamp for RunCpu: %f, %I64d, %I64d, %I64d, %I64d; freq= %f\n",
-             kernel_time, StartTime, EndTime, StartTime2, EndTime2, Frequency);
-    }
-
-    auto end = std::chrono::steady_clock::now();
-    auto diff = end - start;
-    if (it > 0) {
-      total +=
-          std::chrono::duration_cast<std::chrono::milliseconds>(diff).count();
-    }
-
-    if (it > 0) {
-      UINT64 Delta = EndTime - StartTime;
-      float Frequency = static_cast<float>(tsDisjoint.Frequency);
-      float kernel_time = (Delta / Frequency) * 1000.0f;
-      if (kernel_time < minTime)
-        minTime = kernel_time;
-      total_kernel += kernel_time;
-    }
-
-#ifdef PRINT_DATA
-    float result = 0.0;
-    int m = rand() % OutputM;
-    int n = rand() % OutputN;
-    // Read back the result from GPU, verify its correctness against result
-    // computed by CPU
-    {
-      ID3D11Buffer *debugbuf =
-          CreateAndCopyToDebugBuf(g_pDevice, g_pContext, g_pBufResult);
-      D3D11_MAPPED_SUBRESOURCE MappedResource;
-      float *p;
-      g_pContext->Map(debugbuf, 0, D3D11_MAP_READ, 0, &MappedResource);
-
-      // Set a break point here and put down the expression "p, 1024" in your
-      // watch window to see what has been written out by our CS This is also a
-      // common trick to debug CS programs.
-      p = (float *)MappedResource.pData;
-      result = p[m * OutputN + n];
-      g_pContext->Unmap(debugbuf, 0);
-
-      SAFE_RELEASE(debugbuf);
-    }
-
-    float acc = 0.0;
-    for (unsigned int k = 0; k < OutputK; k++) {
-      acc += g_vBuf0[m * OutputK + k] * g_vBuf1[k * OutputN + n];
-    }
-    printf("Elapsed time in %I64d ms, %I64d us. C[%d, %d] = %f, %f\n",
-           std::chrono::duration_cast<std::chrono::milliseconds>(diff).count(),
-           std::chrono::duration_cast<std::chrono::microseconds>(diff).count(),
-           m, n, result, acc);
-
-#endif // PRINT_DATA
+    float kernel_time2 = 0.0;
+    getQueryResults(pQueryDisjoint2, pQueryTimestampStart2, pQueryTimestampEnd2,
+                    &StartTime2, &EndTime2, sizeof(EndTime2), &kernel_time2);
+    printf("timestamp for RunCpu: %f, %f, %I64d, %I64d, %I64d, %I64d;\n",
+           kernel_time, kernel_time2, StartTime, EndTime, StartTime2, EndTime2);
   }
 
-  double avg_time = total / (computeCount - 1);
-  double avg_kernel = total_kernel / (computeCount - 1);
-  printf(
-      "Avg Host GFlops = %f, Avg kernel GFlops = %f, Peak Kernel GFlops = %f\n"
-      "Avg_time = %f ms, Avg_kernel_time = %f ms, min_time = %f ms\n",
-      flops / avg_time / 10000 / 100, flops / avg_kernel / 10000 / 100,
-      flops / minTime / 10000 / 100, avg_time, avg_kernel, minTime);
   // printf( "Cleaning up...\n" );
   SAFE_RELEASE(pQueryDisjoint);
   SAFE_RELEASE(pQueryTimestampStart);
