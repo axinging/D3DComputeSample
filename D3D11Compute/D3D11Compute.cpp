@@ -265,16 +265,12 @@ int __cdecl main() {
   g_pDevice->CreateQuery(&queryDesc, &pQueryTimestampStart2);
   g_pDevice->CreateQuery(&queryDesc, &pQueryTimestampEnd2);
 
-  double flops = 2 * OutputM * OutputN * OutputK;
-  double total = 0.0;
-  double total_kernel = 0.0;
-  double minTime = 1e100;
-  int computeCount = 5;
+  int computeCount = 3;
+  printf("GPU-CPU:\n");
   for (int it = 0; it < computeCount; it++) {
     g_pContext->Begin(pQueryDisjoint);
     g_pContext->End(pQueryTimestampStart);
-
-    auto start = std::chrono::steady_clock::now();
+    // g_pContext->Flush();
 
     ID3D11ShaderResourceView *aRViews[2] = {g_pBuf0SRV, g_pBuf1SRV};
     RunComputeShader(g_pContext, g_pCS, 2, aRViews, nullptr, nullptr, 0,
@@ -282,6 +278,7 @@ int __cdecl main() {
 
     g_pContext->End(pQueryTimestampEnd);
     g_pContext->End(pQueryDisjoint);
+    g_pContext->Flush();
 
     g_pContext->Begin(pQueryDisjoint2);
     g_pContext->End(pQueryTimestampStart2);
@@ -306,8 +303,47 @@ int __cdecl main() {
     float kernel_time2 = 0.0;
     getQueryResults(pQueryDisjoint2, pQueryTimestampStart2, pQueryTimestampEnd2,
                     &StartTime2, &EndTime2, sizeof(EndTime2), &kernel_time2);
-    printf("timestamp for RunCpu: %f, %f, %I64d, %I64d, %I64d, %I64d;\n",
+    printf("timestamp for GPU-CPU: %f, %f, %I64d, %I64d, %I64d, %I64d;\n",
            kernel_time, kernel_time2, StartTime, EndTime, StartTime2, EndTime2);
+  }
+
+  printf("CPU-CPU:\n");
+  for (int it = 0; it < computeCount; it++) {
+	  g_pContext->Begin(pQueryDisjoint);
+	  g_pContext->End(pQueryTimestampStart);
+	  g_pContext->Flush();
+
+	  runCPU(1);
+
+	  g_pContext->End(pQueryTimestampEnd);
+	  g_pContext->End(pQueryDisjoint);
+	  g_pContext->Flush();
+
+	  g_pContext->Begin(pQueryDisjoint2);
+	  g_pContext->End(pQueryTimestampStart2);
+	  g_pContext->Flush();
+	  g_count++;
+	  runCPU(g_count);
+
+	  g_pContext->End(pQueryTimestampEnd2);
+	  g_pContext->End(pQueryDisjoint2);
+	  g_pContext->Flush();
+
+	  // Get Data for timestamp.
+	  UINT64 StartTime = 0;
+	  UINT64 EndTime = 0;
+	  float kernel_time = 0.0;
+	  getQueryResults(pQueryDisjoint, pQueryTimestampStart, pQueryTimestampEnd,
+		  &StartTime, &EndTime, sizeof(EndTime), &kernel_time);
+
+	  // Get Data for timestamp2.
+	  UINT64 StartTime2 = 0;
+	  UINT64 EndTime2 = 0;
+	  float kernel_time2 = 0.0;
+	  getQueryResults(pQueryDisjoint2, pQueryTimestampStart2, pQueryTimestampEnd2,
+		  &StartTime2, &EndTime2, sizeof(EndTime2), &kernel_time2);
+	  printf("timestamp for CPU-CPU: %f, %f, %I64d, %I64d, %I64d, %I64d;\n",
+		  kernel_time, kernel_time2, StartTime, EndTime, StartTime2, EndTime2);
   }
 
   // printf( "Cleaning up...\n" );
